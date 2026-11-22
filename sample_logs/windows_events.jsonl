@@ -1,0 +1,7 @@
+{"TimeCreated":"2026-11-22T10:00:01Z","EventID":4625,"Channel":"Security","Computer":"WIN-ENDPOINT","TargetUserName":"administrator","IpAddress":"192.168.56.101"}
+{"TimeCreated":"2026-11-22T10:00:03Z","EventID":4625,"Channel":"Security","Computer":"WIN-ENDPOINT","TargetUserName":"administrator","IpAddress":"192.168.56.101"}
+{"TimeCreated":"2026-11-22T10:00:05Z","EventID":4625,"Channel":"Security","Computer":"WIN-ENDPOINT","TargetUserName":"administrator","IpAddress":"192.168.56.101"}
+{"TimeCreated":"2026-11-22T10:00:08Z","EventID":4624,"Channel":"Security","Computer":"WIN-ENDPOINT","TargetUserName":"administrator","IpAddress":"192.168.56.101"}
+{"TimeCreated":"2026-11-22T10:00:09Z","EventID":4672,"Channel":"Security","Computer":"WIN-ENDPOINT","TargetUserName":"administrator"}
+{"TimeCreated":"2026-11-22T10:02:00Z","EventID":1,"Channel":"Microsoft-Windows-Sysmon/Operational","Computer":"WIN-ENDPOINT","User":"WIN-ENDPOINT\\administrator","Image":"C:\\Windows\\System32\\cmd.exe","CommandLine":"cmd.exe /c whoami"}
+{"TimeCreated":"2026-11-22T10:02:10Z","EventID":3,"Channel":"Microsoft-Windows-Sysmon/Operational","Computer":"WIN-ENDPOINT","User":"WIN-ENDPOINT\\administrator","Image":"C:\\Windows\\System32\\cmd.exe","SourceIp":"192.168.56.20"}
