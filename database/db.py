@@ -155,3 +155,48 @@ def fetch_alerts(limit: int = 100, db_path: Optional[Path] = None) -> list:
 def count_alerts(db_path: Optional[Path] = None) -> int:
     with connection(db_path) as conn:
         return conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+
+# ---------------------------------------------------------------- dashboard queries
+def search_events(event_type=None, severity=None, source_ip=None,
+                  limit: int = 100, db_path: Optional[Path] = None) -> list:
+    """Filtered event search. Filters are bound parameters, never concatenated."""
+    clauses, params = [], []
+    for column, value in (("event_type", event_type), ("severity", severity),
+                          ("source_ip", source_ip)):
+        if value:
+            clauses.append(f"{column} = ?")
+            params.append(value)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(max(1, min(int(limit), 500)))
+    with connection(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM events {where} ORDER BY timestamp DESC, id DESC LIMIT ?",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_stats(db_path: Optional[Path] = None) -> dict:
+    with connection(db_path) as conn:
+        def one(sql):
+            return conn.execute(sql).fetchone()[0]
+
+        def many(sql):
+            return [dict(r) for r in conn.execute(sql).fetchall()]
+
+        return {
+            "total_events": one("SELECT COUNT(*) FROM events"),
+            "failed_logins": one("SELECT COUNT(*) FROM events WHERE event_type='login_failed'"),
+            "total_alerts": one("SELECT COUNT(*) FROM alerts"),
+            "alerts_by_severity": many(
+                "SELECT severity, COUNT(*) AS n FROM alerts GROUP BY severity"),
+            "events_by_type": many(
+                "SELECT event_type, COUNT(*) AS n FROM events GROUP BY event_type ORDER BY n DESC"),
+            "top_ips": many(
+                "SELECT source_ip, COUNT(*) AS n FROM events "
+                "WHERE event_type='login_failed' AND source_ip IS NOT NULL "
+                "GROUP BY source_ip ORDER BY n DESC LIMIT 5"),
+            "timeline": many(
+                "SELECT substr(timestamp,1,13) AS hour, COUNT(*) AS n "
+                "FROM events GROUP BY hour ORDER BY hour"),
+        }
