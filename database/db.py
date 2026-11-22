@@ -22,11 +22,38 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
 CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    fingerprint    TEXT NOT NULL UNIQUE,
+    rule_id        TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    detection_type TEXT NOT NULL DEFAULT 'rule',
+    severity       TEXT NOT NULL,
+    source_ip      TEXT,
+    username       TEXT,
+    host           TEXT,
+    first_seen     TEXT NOT NULL,
+    last_seen      TEXT NOT NULL,
+    event_count    INTEGER NOT NULL,
+    description    TEXT,
+    mitre          TEXT,
+    evidence       TEXT,
+    status         TEXT NOT NULL DEFAULT 'open',
+    created_at     TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
 """
 
 COLUMNS = (
     "timestamp", "source", "host", "source_ip",
     "username", "event_type", "severity", "message", "raw",
+)
+
+ALERT_COLUMNS = (
+    "fingerprint", "rule_id", "name", "detection_type", "severity",
+    "source_ip", "username", "host", "first_seen", "last_seen",
+    "event_count", "description", "mitre", "evidence", "status",
 )
 
 
@@ -56,6 +83,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
         conn.executescript(SCHEMA)
 
 
+# ---------------------------------------------------------------- events
 def insert_event(event: dict, db_path: Optional[Path] = None) -> int:
     # Parameterized query: values are never concatenated into SQL.
     sql = (
@@ -87,6 +115,43 @@ def fetch_events(limit: int = 100, db_path: Optional[Path] = None) -> list:
     return [dict(r) for r in rows]
 
 
+def fetch_all_events(db_path: Optional[Path] = None) -> list:
+    """All events, oldest first. Used by the detection engine."""
+    with connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM events ORDER BY timestamp ASC, id ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def count_events(db_path: Optional[Path] = None) -> int:
     with connection(db_path) as conn:
         return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
+
+# ---------------------------------------------------------------- alerts
+def insert_alerts(alerts: list, db_path: Optional[Path] = None) -> int:
+    """Insert alerts, silently skipping duplicates. Returns number of NEW rows."""
+    sql = (
+        f"INSERT OR IGNORE INTO alerts ({', '.join(ALERT_COLUMNS)}) "
+        f"VALUES ({', '.join('?' for _ in ALERT_COLUMNS)})"
+    )
+    rows = [tuple(a.get(c) for c in ALERT_COLUMNS) for a in alerts]
+    with connection(db_path) as conn:
+        before = conn.total_changes
+        conn.executemany(sql, rows)
+        return conn.total_changes - before
+
+
+def fetch_alerts(limit: int = 100, db_path: Optional[Path] = None) -> list:
+    limit = max(1, min(int(limit), 1000))
+    with connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM alerts ORDER BY first_seen DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_alerts(db_path: Optional[Path] = None) -> int:
+    with connection(db_path) as conn:
+        return conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
