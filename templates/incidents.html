@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incidents - {{ app_name }}</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  :root { --bg:#0a1128; --panel:#111c3d; --line:#1f2f5c; --text:#dbe4ff; --muted:#8196c9; --accent:#3b82f6; }
+  body { background:var(--bg); color:var(--text); font-family:Inter,"Segoe UI",system-ui,sans-serif; }
+  .side { width:220px; min-height:100vh; background:#070d20; border-right:1px solid var(--line); position:fixed; padding:24px 18px; }
+  .side h5 { color:var(--accent); font-weight:700; letter-spacing:.5px; }
+  .side a { display:block; color:var(--muted); padding:8px 10px; border-radius:6px; text-decoration:none; font-size:.9rem; }
+  .side a.active, .side a:hover { background:var(--panel); color:#fff; }
+  main { margin-left:220px; padding:24px 28px; }
+  .cardx { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .lbl { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.8px; }
+  table { color:var(--text); font-size:.82rem; --bs-table-bg:transparent; --bs-table-color:var(--text); --bs-table-border-color:var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  .clickable { cursor:pointer; } .clickable:hover td { background:#16224a; }
+  .sev { padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; text-transform:uppercase; }
+  .sev-critical{background:#7f1d1d;color:#fecaca} .sev-high{background:#7c2d12;color:#fed7aa}
+  .sev-medium{background:#713f12;color:#fde68a} .sev-low{background:#14532d;color:#bbf7d0}
+  .st { padding:2px 8px; border-radius:6px; font-size:.7rem; font-weight:600; background:#1e3a8a; color:#bfdbfe; }
+  .st-resolved{background:#14532d;color:#bbf7d0} .st-false_positive{background:#334155;color:#cbd5e1}
+  .st-contained{background:#4c1d95;color:#ddd6fe} .st-investigating{background:#713f12;color:#fde68a}
+  .scroll { max-height:300px; overflow:auto; }
+  .form-select, .form-control { background-color:var(--bg); color:var(--text); border-color:var(--line); font-size:.82rem; }
+  .form-control:focus, .form-select:focus { background-color:var(--bg); color:var(--text); }
+  .kv div { padding:3px 0; font-size:.85rem; } .kv span { color:var(--muted); display:inline-block; width:110px; }
+  @media (max-width:800px){ .side{display:none} main{margin-left:0} }
+</style>
+</head>
+<body>
+<nav class="side">
+  <h5>&#128737; Mini SOC</h5>
+  <a href="/">Overview</a>
+  <a class="active" href="/incidents">Incidents</a>
+  <a href="/docs" target="_blank">API docs</a>
+</nav>
+
+<main>
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div><h4 class="mb-0">Incident Response</h4><div class="lbl" id="msg">Loading&hellip;</div></div>
+    <button class="btn btn-primary btn-sm" id="gen">Create incidents from alerts</button>
+  </div>
+
+  <div class="cardx mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="lbl">Incident queue (click a row to investigate)</div>
+      <div class="d-flex gap-2">
+        <select id="f-status" class="form-select form-select-sm"><option value="">All statuses</option></select>
+        <select id="f-sev" class="form-select form-select-sm"><option value="">All severities</option>
+          <option>critical</option><option>high</option><option>medium</option><option>low</option></select>
+      </div>
+    </div>
+    <div class="table-responsive scroll"><table class="table table-sm align-middle mb-0">
+      <thead><tr><th>ID</th><th>Severity</th><th>Incident</th><th>Source IP</th><th>Affected</th><th>Detected</th><th>Status</th></tr></thead>
+      <tbody id="rows"></tbody></table></div>
+  </div>
+
+  <div id="detail"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+// Log data is attacker-controlled: always escape before inserting into HTML.
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sev = s => `<span class="sev sev-${esc(s)}">${esc(s)}</span>`;
+const st = s => `<span class="st st-${esc(s)}">${esc(s)}</span>`;
+const fmt = t => esc(String(t || "").replace("T", " ").slice(0, 19));
+const STATUSES = ["open", "investigating", "contained", "resolved", "false_positive"];
+STATUSES.forEach(s => $("f-status").insertAdjacentHTML("beforeend", `<option>${s}</option>`));
+let current = null;
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let m = r.status;
+    try { m = JSON.stringify((await r.json()).detail); } catch (_) {}
+    throw new Error(m);
+  }
+  return r.json();
+}
+
+async function loadList() {
+  const q = new URLSearchParams({limit: 200});
+  if ($("f-status").value) q.set("status", $("f-status").value);
+  if ($("f-sev").value) q.set("severity", $("f-sev").value);
+  const rows = await api("/api/incidents?" + q);
+  $("rows").innerHTML = rows.map(i => `<tr class="clickable" data-id="${esc(i.incident_id)}">
+    <td><b>${esc(i.incident_id)}</b></td><td>${sev(i.severity)}</td><td>${esc(i.title)}</td>
+    <td>${esc(i.source_ip || "-")}</td><td>${esc(i.affected)}</td><td>${fmt(i.detected_at)}</td><td>${st(i.status)}</td></tr>`).join("")
+    || '<tr><td colspan="7" class="text-secondary">No incidents. Run detection on the Overview page, then click "Create incidents from alerts".</td></tr>';
+  $("msg").textContent = rows.length + " incidents shown";
+}
+
+async function openIncident(id) {
+  current = await api("/api/incidents/" + encodeURIComponent(id));
+  const i = current, a = i.alert || {};
+  $("detail").innerHTML = `<div class="cardx">
+    <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+      <div><div class="lbl">${esc(i.incident_id)}</div>
+        <h5 class="mb-1">${esc(i.title)} ${sev(i.severity)}</h5>
+        <div class="small text-secondary">${esc(i.classification)}</div></div>
+      <div class="d-flex gap-2 align-items-start">
+        <select id="d-status" class="form-select form-select-sm">${STATUSES.map(s => `<option ${s === i.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+        <button id="save" class="btn btn-primary btn-sm">Save</button></div>
+    </div>
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="lbl mb-1">Details</div>
+        <div class="kv mb-3">
+          <div><span>Source IP</span>${esc(i.source_ip || "-")}</div>
+          <div><span>Affected</span>${esc(i.affected)}</div>
+          <div><span>First seen</span>${fmt(a.first_seen)}</div>
+          <div><span>Last seen</span>${fmt(a.last_seen)}</div>
+          <div><span>Events</span>${esc(a.event_count)}</div>
+          <div><span>Rule / MITRE</span>${esc(a.rule_id)} / ${esc(a.mitre)}</div>
+          <div><span>Detection type</span>${esc(a.detection_type)}</div>
+        </div>
+        <div class="lbl mb-1">Detection explanation</div>
+        <p class="small">${esc(i.explanation)}</p>
+        <div class="lbl mb-1">Recommended containment</div>
+        <ol class="small">${i.containment.map(c => `<li>${esc(c)}</li>`).join("")}</ol>
+      </div>
+      <div class="col-lg-6">
+        <div class="lbl mb-1">Investigation checklist</div>
+        <div class="mb-3">${i.checklist.map((c, n) => `<div class="form-check small">
+          <input class="form-check-input chk" type="checkbox" id="chk${n}" ${c.done ? "checked" : ""}>
+          <label class="form-check-label" for="chk${n}">${esc(c.item)}</label></div>`).join("")}</div>
+        <div class="lbl mb-1">Analyst notes</div>
+        <textarea id="d-notes" class="form-control" rows="5" maxlength="5000">${esc(i.notes || "")}</textarea>
+      </div>
+    </div>
+    <div class="lbl mt-3 mb-2">Evidence (${i.evidence_events.length} logs)</div>
+    <div class="table-responsive scroll"><table class="table table-sm mb-0">
+      <thead><tr><th>Time</th><th>Source</th><th>Type</th><th>Sev</th><th>IP</th><th>User</th><th>Message</th></tr></thead>
+      <tbody>${i.evidence_events.map(e => `<tr><td>${fmt(e.timestamp)}</td><td>${esc(e.source)}</td><td>${esc(e.event_type)}</td>
+        <td>${sev(e.severity)}</td><td>${esc(e.source_ip || "-")}</td><td>${esc(e.username || "-")}</td>
+        <td class="text-break">${esc(e.message || "")}</td></tr>`).join("")}</tbody></table></div>
+  </div>`;
+  $("save").onclick = save;
+  $("detail").scrollIntoView({behavior: "smooth"});
+}
+
+async function save() {
+  const body = {
+    status: $("d-status").value,
+    notes: $("d-notes").value,
+    checklist_done: [...document.querySelectorAll(".chk")].map(c => c.checked),
+  };
+  try {
+    await api("/api/incidents/" + encodeURIComponent(current.incident_id), {
+      method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+    });
+    $("msg").textContent = "Saved " + current.incident_id;
+    await loadList();
+    await openIncident(current.incident_id);
+  } catch (err) { $("msg").textContent = "Save failed: " + err.message; }
+}
+
+$("rows").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-id]");
+  if (tr) openIncident(tr.dataset.id).catch(err => $("msg").textContent = err.message);
+});
+$("gen").onclick = async () => {
+  $("gen").disabled = true;
+  try {
+    const r = await api("/api/incidents/generate", {method: "POST"});
+    await loadList();
+    $("msg").textContent = r.new_incidents + " new incidents created";
+  } catch (err) { $("msg").textContent = "Error: " + err.message; }
+  finally { $("gen").disabled = false; }
+};
+$("f-status").onchange = $("f-sev").onchange = loadList;
+loadList().catch(err => $("msg").textContent = "Error loading data: " + err.message);
+</script>
+</body>
+</html>

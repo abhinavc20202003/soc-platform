@@ -30,3 +30,10 @@ DISTINCT_USER_THRESHOLD = int(os.getenv("DISTINCT_USER_THRESHOLD", "3"))
 SUSPICIOUS_IPS = {
     ip.strip() for ip in os.getenv("SUSPICIOUS_IPS", "").split(",") if ip.strip()
 }
+# ML anomaly detection (Phase 6)
+ML_WINDOW_MINUTES = int(os.getenv("ML_WINDOW_MINUTES", "5"))   # must divide 60
+ML_CONTAMINATION = float(os.getenv("ML_CONTAMINATION", "0.01"))
+ML_ZSCORE_THRESHOLD = float(os.getenv("ML_ZSCORE_THRESHOLD", "3.0"))
+ML_RANDOM_SEED = 42
+OFF_HOURS_START = 22   # UTC hour from which logins count as off-hours
+OFF_HOURS_END = 6      # UTC hour before which logins count as off-hours

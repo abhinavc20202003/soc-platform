@@ -34,6 +34,7 @@
   <h5>&#128737; Mini SOC</h5>
   <a class="active" href="#">Overview</a>
   <a href="#alerts">Alerts</a>
+  <a href="/incidents">Incidents</a>
   <a href="#events">Event feed</a>
   <a href="/docs" target="_blank">API docs</a>
   <div class="mt-4 lbl"><span class="dot"></span>Platform online</div>
@@ -64,7 +65,15 @@
       <thead><tr><th>Severity</th><th>Rule</th><th>Detection</th><th>Source IP</th><th>User</th><th>Events</th><th>First seen</th></tr></thead>
       <tbody id="alert-rows"></tbody></table></div>
   </div>
-
+    <div class="cardx mb-3" id="anomalies">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="lbl">ML anomaly predictions (unconfirmed, review before acting)</div>
+      <button class="btn btn-outline-light btn-sm" id="run-ml">Run ML analysis</button>
+    </div>
+    <div class="table-responsive feed"><table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Method</th><th>Entity</th><th>Window (UTC)</th><th>Score</th><th>Why flagged</th></tr></thead>
+      <tbody id="anom-rows"></tbody></table></div>
+  </div>
   <div class="cardx" id="events">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <div class="lbl">Live event feed (refreshes every 5s)</div>
@@ -101,7 +110,7 @@ async function refresh() {
     const q = new URLSearchParams({limit: 50});
     if ($("f-type").value) q.set("event_type", $("f-type").value);
     if ($("f-sev").value) q.set("severity", $("f-sev").value);
-    const [stats, alerts, events] = await Promise.all([get("/api/stats"), get("/api/alerts?limit=100"), get("/api/events?" + q)]);
+        const [stats, alerts, events, anomalies] = await Promise.all([get("/api/stats"), get("/api/alerts?limit=100"), get("/api/events?" + q), get("/api/anomalies?limit=50")]);
 
     $("s-events").textContent = stats.total_events;
     $("s-fail").textContent = stats.failed_logins;
@@ -129,6 +138,12 @@ async function refresh() {
       <td>${esc(e.timestamp.replace("T", " ").slice(0, 19))}</td><td>${esc(e.source)}</td><td>${esc(e.event_type)}</td>
       <td>${sev(e.severity)}</td><td>${esc(e.source_ip || "-")}</td><td>${esc(e.username || "-")}</td>
       <td class="text-truncate" style="max-width:320px">${esc(e.message || "")}</td></tr>`).join("");
+    
+        $("anom-rows").innerHTML = anomalies.map(a => `<tr title="${esc(a.description)}">
+      <td><span class="badge text-bg-primary">${esc(a.method)}</span> ${esc(a.kind)}</td>
+      <td>${esc(a.entity || "-")}</td><td>${esc(String(a.window_start).replace("T", " ").slice(0, 19))}</td>
+      <td>${esc(a.score)}</td><td class="text-break">${esc(a.description)}</td></tr>`).join("")
+      || '<tr><td colspan="5" class="text-secondary">No anomalies yet. Click "Run ML analysis".</td></tr>';
 
     $("updated").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch (err) { $("updated").textContent = "Error loading data: " + err.message; }
@@ -137,6 +152,10 @@ async function refresh() {
 $("run").onclick = async () => {
   $("run").disabled = true;
   try { await fetch("/api/detect", {method: "POST"}); await refresh(); } finally { $("run").disabled = false; }
+};
+$("run-ml").onclick = async () => {
+  $("run-ml").disabled = true;
+  try { await fetch("/api/ml/run", {method: "POST"}); await refresh(); } finally { $("run-ml").disabled = false; }
 };
 $("f-type").onchange = $("f-sev").onchange = refresh;
 refresh(); setInterval(refresh, 5000);
