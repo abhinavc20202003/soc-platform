@@ -124,3 +124,36 @@ DEFAULT_PLAYBOOK = {
 
 def get_playbook(alert_name: str) -> dict:
     return PLAYBOOKS.get(alert_name, DEFAULT_PLAYBOOK)
+
+
+PLAYBOOKS["Port scan detected"] = {
+    "classification": "Discovery: Network Service Scanning",
+    "containment": [
+        "Confirm whether the source is an authorised scanner or a known lab host.",
+        "If unauthorised, block the source IP at the firewall.",
+        "Check which scanned ports are actually open and whether they should be.",
+    ],
+    "checklist": [
+        "Identify the source host and its owner.",
+        "List the ports probed and which responded.",
+        "Look for logins or connections from the same source after the scan.",
+        "Check whether other hosts were scanned by the same source.",
+        "Document whether the scan was authorised.",
+    ],
+}
+
+PLAYBOOKS["Connection to suspicious port"] = {
+    "classification": "Command and Control: Non-Standard Port",
+    "containment": [
+        "Isolate the host if the connection is not explained.",
+        "Block the destination IP and port at the firewall.",
+        "Identify and preserve the process that opened the connection.",
+    ],
+    "checklist": [
+        "Identify the process and user that made the connection.",
+        "Check the destination IP reputation and who owns it.",
+        "Review process-creation events just before the connection.",
+        "Check for persistence on the host.",
+        "Decide whether a legitimate tool uses this port (false positive).",
+    ],
+}

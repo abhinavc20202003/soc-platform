@@ -37,3 +37,12 @@ ML_ZSCORE_THRESHOLD = float(os.getenv("ML_ZSCORE_THRESHOLD", "3.0"))
 ML_RANDOM_SEED = 42
 OFF_HOURS_START = 22   # UTC hour from which logins count as off-hours
 OFF_HOURS_END = 6      # UTC hour before which logins count as off-hours
+# Splunk HEC (Phase 7). URL and token come from .env
+SPLUNK_INDEX = os.getenv("SPLUNK_INDEX", "soc")
+SPLUNK_VERIFY_SSL = os.getenv("SPLUNK_VERIFY_SSL", "true").lower() != "false"
+
+# Network detections (Phase 8)
+PORT_SCAN_PORT_THRESHOLD = int(os.getenv("PORT_SCAN_PORT_THRESHOLD", "10"))
+PORT_SCAN_WINDOW_SECONDS = int(os.getenv("PORT_SCAN_WINDOW_SECONDS", "60"))
+# Ports commonly used by reverse shells and C2 tools
+SUSPICIOUS_PORTS = {4444, 4445, 1337, 31337, 5555, 6666, 6667, 9001}

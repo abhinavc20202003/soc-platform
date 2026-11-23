@@ -1,4 +1,4 @@
-"""SQLite database layer for the Mini SOC platform."""
+﻿"""SQLite database layer for the Mini SOC platform."""
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS events (
     event_type  TEXT NOT NULL,
     severity    TEXT NOT NULL,
     message     TEXT,
-    raw         TEXT
+    raw         TEXT,
+    dest_ip     TEXT,
+    dest_port   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at     TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
+
 CREATE TABLE IF NOT EXISTS incidents (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     incident_id    TEXT NOT NULL UNIQUE,
@@ -81,8 +84,12 @@ CREATE TABLE IF NOT EXISTS anomalies (
 );
 CREATE INDEX IF NOT EXISTS idx_anomalies_window ON anomalies(window_start);
 """
+
+# Columns added after the first release. init_db adds them to older databases.
+EVENT_MIGRATIONS = (("dest_ip", "TEXT"), ("dest_port", "INTEGER"))
+
 COLUMNS = (
-    "timestamp", "source", "host", "source_ip",
+    "timestamp", "source", "host", "source_ip", "dest_ip", "dest_port",
     "username", "event_type", "severity", "message", "raw",
 )
 
@@ -117,6 +124,10 @@ def connection(db_path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
 def init_db(db_path: Optional[Path] = None) -> None:
     with connection(db_path) as conn:
         conn.executescript(SCHEMA)
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+        for name, col_type in EVENT_MIGRATIONS:  # fixed constants, not user input
+            if name not in existing:
+                conn.execute(f"ALTER TABLE events ADD COLUMN {name} {col_type}")
 
 
 # ---------------------------------------------------------------- events
@@ -192,6 +203,7 @@ def count_alerts(db_path: Optional[Path] = None) -> int:
     with connection(db_path) as conn:
         return conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
 
+
 # ---------------------------------------------------------------- dashboard queries
 def search_events(event_type=None, severity=None, source_ip=None,
                   limit: int = 100, db_path: Optional[Path] = None) -> list:
@@ -236,6 +248,8 @@ def get_stats(db_path: Optional[Path] = None) -> dict:
                 "SELECT substr(timestamp,1,13) AS hour, COUNT(*) AS n "
                 "FROM events GROUP BY hour ORDER BY hour"),
         }
+
+
 # ---------------------------------------------------------------- incidents
 INCIDENT_STATUSES = ("open", "investigating", "contained", "resolved", "false_positive")
 
@@ -342,6 +356,8 @@ def fetch_events_by_ids(ids, db_path: Optional[Path] = None) -> list:
             ids,
         ).fetchall()
     return [dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------- ML anomalies
 ANOMALY_COLUMNS = (
     "fingerprint", "method", "kind", "entity", "source_ip", "username",

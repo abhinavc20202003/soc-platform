@@ -1,4 +1,4 @@
-"""Parser for Windows Security and Sysmon events (JSON-lines export)."""
+﻿"""Parser for Windows Security and Sysmon events (JSON-lines export)."""
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -64,6 +64,8 @@ def parse_line(line: str) -> Optional[dict]:
         msg += f" {image}"
     if rec.get("CommandLine"):
         msg += f" | {str(rec['CommandLine'])[:300]}"
+    if rec.get("DestinationIp"):
+        msg += f" -> {rec['DestinationIp']}:{rec.get('DestinationPort', '?')}"
 
     return make_event(
         timestamp=ts,
@@ -72,6 +74,8 @@ def parse_line(line: str) -> Optional[dict]:
         severity=severity,
         host=rec.get("Computer"),
         source_ip=rec.get("IpAddress") or rec.get("SourceIp"),
+        dest_ip=rec.get("DestinationIp"),
+        dest_port=rec.get("DestinationPort"),
         username=rec.get("TargetUserName") or rec.get("User"),
         message=msg,
         raw=line,
