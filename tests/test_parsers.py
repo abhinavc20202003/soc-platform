@@ -59,3 +59,24 @@ def test_invalid_ip_is_dropped():
     line = "Nov 22 10:00:01 web01 sshd[1]: Failed password for root from 999.1.1.1 port 1 ssh2"
     ev = linux_auth.parse_line(line, year=2026)
     assert ev["source_ip"] is None
+
+def test_linux_iso8601_failed_password():
+    line = "2026-11-24T05:45:07.320220+00:00 ubuntu sshd-session[7375]: Failed password for labuser from 192.168.56.150 port 50000 ssh2"
+    ev = linux_auth.parse_line(line)
+    assert ev["event_type"] == "login_failed"
+    assert ev["source_ip"] == "192.168.56.150"
+    assert ev["username"] == "labuser"
+
+
+def test_linux_iso8601_accepted_login():
+    line = "2026-11-24T05:46:06.665043+00:00 ubuntu sshd-session[7375]: Accepted password for vboxuser from 192.168.56.1 port 57261 ssh2"
+    ev = linux_auth.parse_line(line)
+    assert ev["event_type"] == "login_success"
+    assert ev["username"] == "vboxuser"
+
+
+def test_linux_iso8601_sudo_shadow_access():
+    line = "2026-11-24T05:45:04+00:00 ubuntu sudo: vboxuser : TTY=/dev/pts/0 ; PWD=/ ; USER=root ; COMMAND=/usr/bin/cat /etc/shadow"
+    ev = linux_auth.parse_line(line)
+    assert ev["event_type"] == "privilege_escalation"
+    assert ev["username"] == "vboxuser"
