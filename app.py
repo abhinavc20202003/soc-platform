@@ -1,5 +1,6 @@
-"""Mini SOC API and dashboard."""
+﻿"""Mini SOC API and dashboard."""
 import json
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal, Optional
 
@@ -143,3 +144,31 @@ def api_anomalies(limit: int = Query(100, ge=1, le=500)) -> list:
         except json.JSONDecodeError:
             r["features"] = {}
     return rows
+
+# ---------------------------------------------------------------- reports
+@app.get("/api/reports/csv")
+def api_report_csv():
+    from fastapi.responses import Response
+    from reports.csv_report import build_alerts_csv
+    from reports.data import build_report_data
+
+    csv_text = build_alerts_csv(build_report_data())
+    filename = f"mini-soc-alerts-{datetime.now(timezone.utc):%Y%m%d-%H%M}.csv"
+    return Response(
+        content=csv_text, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/reports/pdf")
+def api_report_pdf():
+    from fastapi.responses import FileResponse
+    from reports.data import build_report_data
+    from reports.pdf_report import build_pdf_report
+
+    out_dir = config.BASE_DIR / "logs" / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"mini-soc-report-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.pdf"
+    out_path = out_dir / filename
+    build_pdf_report(build_report_data(), out_path)
+    return FileResponse(out_path, media_type="application/pdf", filename=filename)
