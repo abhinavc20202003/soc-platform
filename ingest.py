@@ -6,7 +6,8 @@ Usage:
     python ingest.py firewall C:/soc-lab-transfer/pfirewall.log
     python ingest.py ufw C:/soc-lab-transfer/ufw_export.log
 
-Run each file once: re-ingesting the same file creates duplicate events.
+Safe to run more than once on the same file: duplicate log lines are
+detected and skipped automatically, so only genuinely new events are stored.
 """
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ PARSERS = {
 
 
 def ingest_file(kind: str, path: Path) -> int:
+    """Parse and insert a log file. Returns the number of NEW events stored;
+    exact duplicates of already-stored events are skipped and not counted."""
     if kind not in PARSERS:
         raise ValueError(f"Unknown log kind: {kind!r} (use linux, windows, firewall or ufw)")
     if not path.is_file():
@@ -38,4 +41,4 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
     n = ingest_file(sys.argv[1], Path(sys.argv[2]))
-    print(f"Ingested {n} events. Total in database: {db.count_events()}")
+    print(f"Ingested {n} new event(s) (duplicates skipped). Total in database: {db.count_events()}")

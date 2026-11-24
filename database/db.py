@@ -1,4 +1,5 @@
 ﻿"""SQLite database layer for the Mini SOC platform."""
+import hashlib
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,18 +9,19 @@ import config
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT NOT NULL,
-    source      TEXT NOT NULL,
-    host        TEXT,
-    source_ip   TEXT,
-    username    TEXT,
-    event_type  TEXT NOT NULL,
-    severity    TEXT NOT NULL,
-    message     TEXT,
-    raw         TEXT,
-    dest_ip     TEXT,
-    dest_port   INTEGER
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp    TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    host         TEXT,
+    source_ip    TEXT,
+    username     TEXT,
+    event_type   TEXT NOT NULL,
+    severity     TEXT NOT NULL,
+    message      TEXT,
+    raw          TEXT,
+    dest_ip      TEXT,
+    dest_port    INTEGER,
+    content_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);
@@ -99,6 +101,25 @@ ALERT_COLUMNS = (
     "event_count", "description", "mitre", "evidence", "status",
 )
 
+# Fields used to fingerprint an event when it has no raw log text
+# (e.g. synthetic/test events). Real ingested events use their raw line
+# instead, which is more precise (it captures packet IDs, ports, etc.).
+HASH_FIELDS = (
+    "timestamp", "source", "host", "source_ip", "dest_ip", "dest_port",
+    "username", "event_type", "severity", "message",
+)
+
+
+def _content_hash(event: dict) -> str:
+    """Fingerprint an event so the exact same log line can never be stored
+    twice, while genuinely different lines (different port, timestamp,
+    packet ID, etc.) always hash differently and are kept."""
+    raw = event.get("raw")
+    basis = f"{event.get('source', '')}|{raw}" if raw else "|".join(
+        str(event.get(f, "")) for f in HASH_FIELDS
+    )
+    return hashlib.sha256(basis.encode("utf-8", "replace")).hexdigest()
+
 
 def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path else config.DB_PATH
@@ -121,6 +142,29 @@ def connection(db_path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _ensure_content_hash(conn: sqlite3.Connection) -> None:
+    """Adds content_hash to older databases, backfills it for any existing
+    rows, removes duplicate rows that already exist, then enforces
+    uniqueness going forward. Safe to run every startup, including on a
+    database that already has no duplicates."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+    if "content_hash" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN content_hash TEXT")
+    unhashed = conn.execute("SELECT * FROM events WHERE content_hash IS NULL").fetchall()
+    for row in unhashed:
+        conn.execute(
+            "UPDATE events SET content_hash = ? WHERE id = ?",
+            (_content_hash(dict(row)), row["id"]),
+        )
+    conn.execute(
+        "DELETE FROM events WHERE id NOT IN "
+        "(SELECT MIN(id) FROM events GROUP BY content_hash)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_content_hash ON events(content_hash)"
+    )
+
+
 def init_db(db_path: Optional[Path] = None) -> None:
     with connection(db_path) as conn:
         conn.executescript(SCHEMA)
@@ -128,29 +172,36 @@ def init_db(db_path: Optional[Path] = None) -> None:
         for name, col_type in EVENT_MIGRATIONS:  # fixed constants, not user input
             if name not in existing:
                 conn.execute(f"ALTER TABLE events ADD COLUMN {name} {col_type}")
+        _ensure_content_hash(conn)
 
 
 # ---------------------------------------------------------------- events
-def insert_event(event: dict, db_path: Optional[Path] = None) -> int:
-    # Parameterized query: values are never concatenated into SQL.
+def insert_event(event: dict, db_path: Optional[Path] = None) -> Optional[int]:
+    """Insert one event, skipping it if an identical one is already stored.
+    Returns the new row id, or None if it was a duplicate."""
+    h = _content_hash(event)
     sql = (
-        f"INSERT INTO events ({', '.join(COLUMNS)}) "
-        f"VALUES ({', '.join('?' for _ in COLUMNS)})"
+        f"INSERT OR IGNORE INTO events ({', '.join(COLUMNS)}, content_hash) "
+        f"VALUES ({', '.join('?' for _ in COLUMNS)}, ?)"
     )
     with connection(db_path) as conn:
-        cur = conn.execute(sql, tuple(event.get(c) for c in COLUMNS))
-        return cur.lastrowid
+        cur = conn.execute(sql, tuple(event.get(c) for c in COLUMNS) + (h,))
+        return cur.lastrowid if cur.rowcount else None
 
 
 def insert_events(events: list, db_path: Optional[Path] = None) -> int:
+    """Insert events, skipping duplicates. Returns the number of NEW rows
+    stored (not the number passed in), so re-ingesting the same file twice
+    is always safe and reports 0 the second time."""
     sql = (
-        f"INSERT INTO events ({', '.join(COLUMNS)}) "
-        f"VALUES ({', '.join('?' for _ in COLUMNS)})"
+        f"INSERT OR IGNORE INTO events ({', '.join(COLUMNS)}, content_hash) "
+        f"VALUES ({', '.join('?' for _ in COLUMNS)}, ?)"
     )
-    rows = [tuple(e.get(c) for c in COLUMNS) for e in events]
+    rows = [tuple(e.get(c) for c in COLUMNS) + (_content_hash(e),) for e in events]
     with connection(db_path) as conn:
+        before = conn.total_changes
         conn.executemany(sql, rows)
-    return len(rows)
+        return conn.total_changes - before
 
 
 def fetch_events(limit: int = 100, db_path: Optional[Path] = None) -> list:
